@@ -99,11 +99,13 @@ folder.
 
 ## Known limits
 
-- Timeout: on Windows the whole process tree is stopped. On Linux and macOS
-  only the shell that was started is signalled, so a background process the
-  command launched may keep running.
-- The output cap applies to what is reported. Up to 10 MB is held in memory
-  while a command runs; beyond that the command is stopped and marked failed.
+- Timeout: on Windows the process tree is stopped with `taskkill`. On Linux
+  and macOS the command runs in its own process group and the group receives
+  SIGTERM. A process that ignores SIGTERM or moves itself to another group can
+  keep running, and the tool does not check that everything has exited.
+- The output cap applies to what is reported. About 10 MB of output is held in
+  memory while a command runs; beyond that the command is stopped and marked
+  failed.
 - Only committed changes between the base ref and `HEAD` are listed.
   Uncommitted and untracked files are not shown.
 - `--format json` is accepted but not implemented; output is always Markdown.

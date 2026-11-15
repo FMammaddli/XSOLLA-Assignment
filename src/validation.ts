@@ -1,12 +1,12 @@
-import { exec, execFile, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { ValidationResult } from "./types.js";
 
 /** How long one validation command may run before it is stopped. */
 export const DEFAULT_TIMEOUT_MS = 120_000;
 /** How many characters of command output are kept in the report. */
 export const DEFAULT_MAX_OUTPUT_CHARS = 20_000;
-/** Hard cap on what we buffer in memory while the command runs. */
-const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+/** Hard cap on the output we hold in memory while the command runs. */
+const MAX_BUFFER_CHARS = 10 * 1024 * 1024;
 
 export type ValidationOptions = {
   timeoutMs?: number;
@@ -23,16 +23,24 @@ export function boundOutput(output: string, maxChars: number): string {
 }
 
 /**
- * Stops a command that ran too long. On Windows the whole process tree is
- * stopped. Elsewhere only the shell we started gets the signal, so a process
- * the command launched in the background can outlive the timeout.
+ * Stops a command and the processes it started. Windows: taskkill on the
+ * process tree. Elsewhere: the command runs in its own process group (see
+ * `detached` below) and the whole group is signalled. A process that moves
+ * itself to another group or ignores SIGTERM can still survive.
  */
 function stopCommand(child: ChildProcess): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
+  if (child.pid === undefined) {
+    return;
+  }
+  if (process.platform === "win32") {
     execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
     return;
   }
-  child.kill("SIGTERM");
+  try {
+    process.kill(-child.pid, "SIGTERM"); // negative pid = the whole group
+  } catch {
+    // The group has already exited.
+  }
 }
 
 function failedOutput(stdout: string, stderr: string): string {
@@ -52,47 +60,72 @@ export function runValidation(
 
   // A failed command is a normal result, so this promise never rejects.
   return new Promise((resolve) => {
-    let timedOut = false;
-    const child = exec(
-      command,
-      { cwd, maxBuffer: MAX_BUFFER_BYTES },
-      (error, stdout, stderr) => {
-        clearTimeout(timer);
-        if (!error) {
-          resolve({
-            command,
-            status: "passed",
-            output: boundOutput(stdout || stderr, maxOutputChars),
-          });
-          return;
-        }
+    let stdout = "";
+    let stderr = "";
+    let stopReason: string | undefined;
 
-        // Node types `code` as a number, but it is a string for non-exit errors.
-        const code: unknown = error.code;
-        let detail: string;
-        if (timedOut) {
-          detail = `timed out after ${timeoutMs} ms and was stopped`;
-        } else if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
-          detail = `produced more than ${MAX_BUFFER_BYTES} bytes of output and was stopped`;
-        } else if (typeof code === "number") {
-          detail = `exited with code ${code}`;
-        } else if (error.signal) {
-          detail = `stopped by signal ${error.signal}`;
-        } else {
-          detail = `could not be run: ${error.message}`;
-        }
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      detached: process.platform !== "win32",
+      windowsHide: true,
+    });
+
+    const stop = (reason: string) => {
+      if (stopReason === undefined) {
+        stopReason = reason;
+        stopCommand(child);
+      }
+    };
+    const timer = setTimeout(
+      () => stop(`timed out after ${timeoutMs} ms and was stopped`),
+      timeoutMs,
+    );
+    const checkSize = () => {
+      if (stdout.length + stderr.length > MAX_BUFFER_CHARS) {
+        stop(`produced more than ${MAX_BUFFER_CHARS} characters of output and was stopped`);
+      }
+    };
+
+    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk;
+      checkSize();
+    });
+    child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk;
+      checkSize();
+    });
+
+    const fail = (detail: string) => {
+      clearTimeout(timer);
+      resolve({
+        command,
+        status: "failed",
+        output: boundOutput(failedOutput(stdout, stderr), maxOutputChars),
+        detail,
+      });
+    };
+
+    // "error" means the command could not be started at all (e.g. bad folder).
+    child.on("error", (error) => fail(`could not be run: ${error.message}`));
+
+    // "close" fires once the command has ended and its output is fully read.
+    child.on("close", (code, signal) => {
+      if (stopReason !== undefined) {
+        fail(stopReason);
+      } else if (code === 0) {
+        clearTimeout(timer);
         resolve({
           command,
-          status: "failed",
-          output: boundOutput(failedOutput(stdout, stderr), maxOutputChars),
-          detail,
+          status: "passed",
+          output: boundOutput(stdout || stderr, maxOutputChars),
         });
-      },
-    );
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stopCommand(child);
-    }, timeoutMs);
+      } else if (code !== null) {
+        fail(`exited with code ${code}`);
+      } else {
+        fail(`stopped by signal ${signal}`);
+      }
+    });
   });
 }
 
