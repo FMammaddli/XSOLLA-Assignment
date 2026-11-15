@@ -13,7 +13,9 @@ export function markdownReport(input: ReportInput): string {
   }
   lines.push("", "## Validation output");
   for (const result of input.validationResults) {
-    lines.push(`### ${result.command}`, "```", result.output, "```");
+    const status =
+      result.status === "passed" ? "Status: passed" : `Status: FAILED (${result.detail ?? "unknown reason"})`;
+    lines.push(`### ${result.command}`, status, "```", result.output || "(no output)", "```");
   }
   return lines.join("\n");
 }
