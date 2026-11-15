@@ -67,6 +67,20 @@ describe("validation limits", () => {
   it("leaves short output untouched", () => {
     expect(boundOutput("short", 100)).toBe("short");
   });
+
+  it("leaves output exactly at the cap untouched", () => {
+    const exact = "a".repeat(100);
+    expect(boundOutput(exact, 100)).toBe(exact);
+  });
+
+  it("cuts output one character over the cap, keeping the last characters", () => {
+    const over = "X" + "a".repeat(100);
+    const bounded = boundOutput(over, 100);
+
+    expect(bounded).toContain("[output truncated: showing the last 100 of 101 characters]");
+    expect(bounded.endsWith("a".repeat(100))).toBe(true);
+    expect(bounded).not.toContain("X");
+  });
 });
 
 describe("markdownReport status line", () => {
