@@ -6,21 +6,26 @@ import { reviewRepository } from "./core.js";
 
 const server = new McpServer({ name: "repository-inspector", version: "2.0.0" });
 
+// Trust boundary: an MCP client is an AI agent whose input may be influenced by
+// untrusted text. This tool is therefore inspection-only. It deliberately has
+// no way to run validation commands; that capability exists only in the CLI,
+// where a developer types the command themselves.
 server.tool(
   "review_repository",
-  "Inspects a Git repository and returns a review report.",
+  "Read-only: lists files changed in a local Git repository compared with a base ref " +
+    "and returns a Markdown report. Does not run validation commands; use the CLI for that.",
   {
-    repo_path: z.string().describe("Repository path to inspect."),
-    baseRef: z.string().optional(),
-    validationCommands: z.array(z.string()).optional(),
+    repoPath: z.string().min(1).describe("Path of the local Git repository to inspect."),
+    baseRef: z.string().optional().describe('Branch or commit to compare against. Default: "main".'),
   },
-  async (input: any) => {
-    const { report } = await reviewRepository({
-      repositoryPath: input.repoPath,
-      baseRef: input.baseRef,
-      validationCommands: input.validationCommands,
-    });
-    return { content: [{ type: "text", text: report }] };
+  async ({ repoPath, baseRef }) => {
+    try {
+      const { report } = await reviewRepository({ repositoryPath: repoPath, baseRef });
+      return { content: [{ type: "text", text: report }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: `Review failed: ${message}` }], isError: true };
+    }
   },
 );
 
