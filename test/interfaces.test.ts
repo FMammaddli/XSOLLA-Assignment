@@ -82,6 +82,26 @@ describe("CLI entry point", () => {
     expect(report).toContain("Status: FAILED (exited with code 1)");
   }, 30_000);
 
+  it("keeps going after a failed command and reports every result", () => {
+    const run = runCli(
+      "review",
+      "--repo",
+      repo,
+      "--validate",
+      `node -e "console.log('first-fails');process.exit(7)"`,
+      "--validate",
+      `node -e "console.log('second-passes')"`,
+    );
+
+    expect(run.status).toBe(1);
+    const report = readReport();
+    expect(report).toContain("Status: FAILED (exited with code 7)");
+    expect(report).toContain("first-fails");
+    expect(report).toContain("Status: passed");
+    expect(report).toContain("second-passes");
+    expect(report.indexOf("first-fails")).toBeLessThan(report.indexOf("second-passes"));
+  }, 30_000);
+
   it("rejects a base ref that git would read as an option", () => {
     const target = join(outDir, "written-by-git.txt");
     const run = runCli("review", "--repo", repo, "--base-ref", `--output=${target}`);
@@ -131,18 +151,29 @@ describe("MCP entry point", () => {
   });
 
   it("does not run a validation command even if a client sends one", async () => {
-    const marker = join(outDir, "mcp-ran-a-command.txt");
-    const script = `require('fs').writeFileSync(${JSON.stringify(marker)}, 'x')`;
-    await client.callTool({
+    // Validation commands run inside the repository, so the marker lands there.
+    const command = `node -e "require('fs').writeFileSync('command-ran.txt','x')"`;
+    const marker = join(repo, "command-ran.txt");
+
+    // Control: the same command does create the marker when run through the CLI.
+    const cliRun = runCli("review", "--repo", repo, "--validate", command);
+    expect(cliRun.status).toBe(0);
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+
+    // Over MCP the field is ignored: a normal report comes back and nothing runs.
+    const result = await client.callTool({
       name: "review_repository",
-      arguments: {
-        repoPath: repo,
-        validationCommands: [`node -e ${JSON.stringify(script)}`],
-      },
+      arguments: { repoPath: repo, validationCommands: [command] },
     });
 
+    const text = (result.content as { type: string; text: string }[])[0].text;
     expect(existsSync(marker)).toBe(false);
-  });
+    expect(result.isError).toBeFalsy();
+    expect(text).toContain("feature.txt (added)");
+    expect(text).not.toContain("command-ran.txt");
+    expect(text).not.toContain("Status:");
+  }, 30_000);
 
   it("returns a readable error instead of crashing on a bad base ref", async () => {
     const result = await client.callTool({
