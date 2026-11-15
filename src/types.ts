@@ -11,14 +11,13 @@ export type ValidationResult = {
   detail?: string;
 };
 
-export type ReviewResult = {
-  report: string;
-  validationResults: ValidationResult[];
+export type ReviewSummary = {
+  changedFiles: number;
+  validations: { requested: boolean; total: number; passed: number; failed: number };
 };
 
 export type ReviewRequest = {
   repositoryPath: string;
   baseRef?: string;
   validationCommands?: string[];
-  format?: "markdown" | "json";
 };

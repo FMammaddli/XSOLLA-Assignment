@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { reviewRepository } from "./core.js";
+import { markdownReport } from "./report.js";
 
 const server = new McpServer({ name: "repository-inspector", version: "2.0.0" });
 
@@ -20,8 +21,8 @@ server.tool(
   },
   async ({ repoPath, baseRef }) => {
     try {
-      const { report } = await reviewRepository({ repositoryPath: repoPath, baseRef });
-      return { content: [{ type: "text", text: report }] };
+      const review = await reviewRepository({ repositoryPath: repoPath, baseRef });
+      return { content: [{ type: "text", text: markdownReport(review) }] };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { content: [{ type: "text", text: `Review failed: ${message}` }], isError: true };
