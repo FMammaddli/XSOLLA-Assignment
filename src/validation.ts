@@ -67,13 +67,15 @@ export function runValidation(
           return;
         }
 
+        // Node types `code` as a number, but it is a string for non-exit errors.
+        const code: unknown = error.code;
         let detail: string;
         if (timedOut) {
           detail = `timed out after ${timeoutMs} ms and was stopped`;
-        } else if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+        } else if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
           detail = `produced more than ${MAX_BUFFER_BYTES} bytes of output and was stopped`;
-        } else if (typeof error.code === "number") {
-          detail = `exited with code ${error.code}`;
+        } else if (typeof code === "number") {
+          detail = `exited with code ${code}`;
         } else if (error.signal) {
           detail = `stopped by signal ${error.signal}`;
         } else {
