@@ -50,9 +50,50 @@ npm test
 ```bash
 npm run inspector -- review --repo ./path/to/repo --format markdown
 npm run inspector -- review --repo ./path/to/repo --validate "npm test"
+npm run inspector -- review --repo . --format json --output reports/review.json
+npm run inspector -- --help
 ```
 
-The report is written to `review-report.md` in the current directory.
+| Option | Meaning |
+| --- | --- |
+| `--repo <path>` | Git repository to inspect (required). |
+| `--base-ref <ref>` | Branch or commit to compare against. Default `main`. |
+| `--validate <command>` | Shell command to run in the repository. Repeatable. |
+| `--format <format>` | `markdown` (default) or `json`. |
+| `--output <path>` | Where to write the report. |
+| `--help`, `-h` | Print usage and examples, exit 0, inspect nothing. |
+
+**Report location.** The default is `review-report.md`, or
+`review-report.json` with `--format json`, in the current directory. An
+explicit `--output` always wins. Relative paths are resolved from the folder
+the terminal is in, not from the repository. An existing file is overwritten
+without asking. The parent folder is not created: if it does not exist, or the
+file cannot be written, the CLI prints `Error: Could not write the report
+to <path>: <reason>` and exits 1.
+
+**Summary.** Every report starts with the number of changed files and the
+validation totals (`2 passed, 1 failed`), or `none requested` when no
+`--validate` was given. In JSON this is the `summary` object.
+
+**JSON shape.** The file contains only JSON; messages go to the terminal.
+
+```json
+{
+  "repository": { "path": "...", "baseRef": "main" },
+  "summary": {
+    "changedFiles": 1,
+    "validations": { "requested": true, "total": 2, "passed": 1, "failed": 1 }
+  },
+  "changedFiles": [{ "path": "feature.txt", "status": "added" }],
+  "validationResults": [
+    { "command": "...", "status": "failed", "output": "...", "detail": "exited with code 6" }
+  ]
+}
+```
+
+**Exit codes.** `0` report written and nothing failed; `1` report written but
+a validation failed, or the review or the write failed; `2` invalid arguments
+(unknown option, missing value, unsupported format, unknown command).
 
 The CLI is the primary interface. It is meant for a developer working in a
 local repository they trust, because `--validate` runs the given text as a
@@ -81,7 +122,10 @@ It exposes one tool, `review_repository`, with this input:
 | `repoPath` | string | yes      | Path of the local Git repository to inspect. |
 | `baseRef`  | string | no       | Ref to compare against. Default: `main`.     |
 
-It returns the same Markdown report as the CLI, as text.
+It returns Markdown text only (no JSON, no file is written). For the same
+repository and base ref it is identical to the CLI's Markdown report without
+`--validate`, because both use the same review and report code. A test
+compares the two.
 
 ### Intentional difference from the CLI
 
@@ -108,7 +152,9 @@ folder.
   failed.
 - Only committed changes between the base ref and `HEAD` are listed.
   Uncommitted and untracked files are not shown.
-- `--format json` is accepted but not implemented; output is always Markdown.
+- Options must be written as `--name value`; `--name=value` is rejected as an
+  unknown option. A value that is itself an option name counts as missing.
+- JSON output has no schema version field yet.
 
 ## Project layout
 
